@@ -47,10 +47,9 @@ Compatibility aliases:
 2. Proxy validates `model`, messages, and user token (`Authorization: Bearer <cai_token>`).
 3. Proxy resolves character by alias (`CAI_MODEL_ALIAS` / `CAI_MODEL_MAP_JSON`).
 4. Proxy merges/synchronizes session history (`X-Session-Id` or `user`).
-5. Proxy builds a guarded upstream prompt (with system + style hints + history).
-6. By default, proxy sends full context once per session and then compact continuation prompts.
-7. Proxy sends message to c.ai via `cainode`.
-8. Proxy sanitizes output and returns OpenAI-compatible response JSON.
+5. Proxy serializes Risu/OpenAI messages as-is (system/user/assistant) and sends that transcript upstream.
+6. Proxy sends message to c.ai via `cainode`.
+7. Proxy returns OpenAI-compatible response JSON.
 
 ## Core files and responsibilities
 
@@ -118,10 +117,6 @@ Optional:
 - `CAI_MEMORY_MAX_CHARS=1200`
 - `CAI_REQUEST_TIMEOUT_MS=60000`
 - `CAI_CONNECT_TIMEOUT_MS=45000`
-- `CAI_CONTEXT_SEND_MODE=hybrid` (`hybrid` or `full`)
-- `CAI_COMPACT_HISTORY_TURNS=4`
-- `CAI_COMPACT_HISTORY_CHARS=280`
-- `CAI_FULL_CONTEXT_EVERY_TURNS=0`
 
 See `.env.example`.
 
@@ -173,4 +168,4 @@ vercel deploy --prod -y
 - c.ai backend is character-centric; this proxy maps alias to character id.
 - Memory and persona cache are in-process (serverless instance-local).
 - Cold starts and c.ai upstream latency are expected in serverless mode.
-- In `hybrid` context mode, the first turn per session is full context and following turns are compact for lower latency.
+- For edited/re-generated history, proxy can reset upstream conversation when the incoming message chain is rewritten (not append-only).
