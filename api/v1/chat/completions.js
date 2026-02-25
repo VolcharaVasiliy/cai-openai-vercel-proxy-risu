@@ -86,56 +86,47 @@ function parseRisuConversationBlob(content) {
 
   const historyMarker = findFirstMarkerMatch(content, [
     /^\s*Conversation history\s*:/im,
-    /^\s*Chat history\s*:/im,
-    /^\s*History\s*:/im
+    /^\s*История диалога\s*:/im,
+    /^\s*История чата\s*:/im
   ]);
   const currentMarker = findFirstMarkerMatch(content, [
     /^\s*Current user message\s*:/im,
     /^\s*Current user input\s*:/im,
-    /^\s*Current message\s*:/im,
-    /^\s*User message\s*:/im
+    /^\s*Текущее сообщение пользователя\s*:/im,
+    /^\s*Сообщение пользователя\s*:/im,
+    /^\s*Текущее сообщение\s*:/im
   ]);
 
-  if (!historyMarker && !currentMarker) {
+  if (!historyMarker || !currentMarker) {
     return null;
   }
 
-  let systemText = "";
-  let historySection = "";
-  let currentUserMessage = "";
+  const historyStart = historyMarker.index + historyMarker.length;
+  if (currentMarker.index <= historyStart) {
+    return null;
+  }
 
-  if (historyMarker) {
-    const historyStart = historyMarker.index + historyMarker.length;
-    systemText = content.slice(0, historyMarker.index).trim();
+  const systemText = content.slice(0, historyMarker.index).trim();
+  const historySection = content.slice(historyStart, currentMarker.index).trim();
+  const currentUserMessage = content.slice(currentMarker.index + currentMarker.length).trim();
 
-    if (currentMarker && currentMarker.index > historyStart) {
-      historySection = content.slice(historyStart, currentMarker.index).trim();
-      currentUserMessage = content.slice(currentMarker.index + currentMarker.length).trim();
-    } else {
-      historySection = content.slice(historyStart).trim();
-    }
-  } else if (currentMarker) {
-    historySection = content.slice(0, currentMarker.index).trim();
-    currentUserMessage = content.slice(currentMarker.index + currentMarker.length).trim();
+  if (!currentUserMessage) {
+    return null;
   }
 
   const turns = [];
   let lastTurn = null;
-  let roleLineCount = 0;
 
   for (const line of historySection.split(/\r?\n/)) {
-    const roleMatch = line.match(/^\s*(assistant|user|model|bot|ai|character|a|u)\s*:\s*(.*)$/i);
+    const roleMatch = line.match(
+      /^\s*(assistant|user|ассистент|пользователь|юзер)\s*:\s*(.*)$/i
+    );
 
     if (roleMatch) {
       const rawRole = roleMatch[1].toLowerCase();
       const contentPart = roleMatch[2].trim();
       const role =
-        rawRole === "assistant" ||
-        rawRole === "model" ||
-        rawRole === "bot" ||
-        rawRole === "ai" ||
-        rawRole === "character" ||
-        rawRole === "a"
+        rawRole === "assistant" || rawRole === "ассистент"
           ? "assistant"
           : "user";
 
@@ -144,7 +135,6 @@ function parseRisuConversationBlob(content) {
         content: contentPart
       };
       turns.push(lastTurn);
-      roleLineCount += 1;
       continue;
     }
 
@@ -155,20 +145,10 @@ function parseRisuConversationBlob(content) {
   }
 
   const normalizedTurns = turns.filter((item) => item && item.content);
-  if (!historyMarker && roleLineCount < 2) {
-    return null;
-  }
-
-  if (currentUserMessage) {
-    normalizedTurns.push({
-      role: "user",
-      content: currentUserMessage
-    });
-  }
-
-  if (!normalizedTurns.length) {
-    return null;
-  }
+  normalizedTurns.push({
+    role: "user",
+    content: currentUserMessage
+  });
 
   return {
     systemText,
@@ -181,19 +161,13 @@ function rebuildMessagesFromRisuBlob(messages) {
     return [];
   }
 
-  let parsed = null;
-  for (let i = messages.length - 1; i >= 0; i -= 1) {
-    const message = messages[i];
-    if (message?.role !== "user" || !message.content) {
-      continue;
-    }
-    parsed = parseRisuConversationBlob(message.content);
-    if (parsed) {
-      break;
-    }
+  const lastUserMessage = [...messages].reverse().find((msg) => msg.role === "user" && msg.content);
+  if (!lastUserMessage) {
+    return messages;
   }
 
-  if (!parsed || !Array.isArray(parsed.turns) || !parsed.turns.length) {
+  const parsed = parseRisuConversationBlob(lastUserMessage.content);
+  if (!parsed) {
     return messages;
   }
 
@@ -212,6 +186,10 @@ function rebuildMessagesFromRisuBlob(messages) {
       role: "system",
       content: mergedSystemText
     });
+  }
+
+  if (!Array.isArray(parsed.turns) || !parsed.turns.length) {
+    return messages;
   }
 
   return rebuilt.concat(parsed.turns);

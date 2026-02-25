@@ -92,7 +92,6 @@ This is safer for shared deployments where each user should use their own token.
 - If no session id is provided, proxy uses `default-session` for that token+model.
 - If client sends full message history, proxy uses it.
 - If client sends only last user message, proxy extends history from in-memory store.
-- Default in-memory turn cap is `400` (configurable via `CAI_MEMORY_MAX_TURNS`).
 
 ## Risu setup (recommended)
 
@@ -128,7 +127,7 @@ Optional:
 - `CAI_ALLOW_SERVER_TOKEN=true`
 - `CAI_TOKEN=<token>`
 - `CAI_LEAK_GUARD_TERMS=term1,term2`
-- `CAI_MEMORY_MAX_TURNS=400`
+- `CAI_MEMORY_MAX_TURNS=24`
 - `CAI_MEMORY_MAX_CHARS=8000`
 - `CAI_REQUEST_TIMEOUT_MS=60000`
 - `CAI_CONNECT_TIMEOUT_MS=45000`
