@@ -1,32 +1,36 @@
 ﻿# Report - cai-openai-vercel-proxy-prod-clean - 2026-02-25
 
 ## Summary
-- Deployed current stable version to Vercel production with shared alias URL.
-- Published project to GitHub with clean structure and updated documentation.
-- Kept per-user token mode as default (`Authorization` from client), with optional server fallback disabled unless explicitly enabled.
-- Updated GitHub instructions for practical onboarding: one-click Vercel deploy, token extraction steps, and Risu setup without `reverse_proxy`.
+- Added upstream context optimization mode: full context once per session, then compact continuation prompts.
+- Kept per-user token mode unchanged (`Authorization` required by default).
+- Deployed preview build for validation.
 
 ## Files
-- `README.md` - added Vercel one-click deploy button, public project URL, explicit token extraction via DevTools (`user/` -> `authorization`), and updated Risu setup (OpenAI-compatible mode, no `reverse_proxy`).
-- `lib/config.js` - token resolution kept in secure default mode (`CAI_ALLOW_SERVER_TOKEN=true` required for server token fallback).
-- `REPORT.md` - updated with final deploy/publication results.
+- `api/v1/chat/completions.js` - added per-session prompt strategy state (`full` vs `compact`), context fingerprinting, compact prompt builder, optional force-full header.
+- `.env.example` - added new context-mode env options (`CAI_CONTEXT_SEND_MODE`, compact tuning, periodic full refresh).
+- `README.md` - documented hybrid context flow and new env variables.
+- `REPORT.md` - updated with this optimization pass and verification.
 
 ## Rationale
-- User requested production "normal" URL on Vercel and GitHub publication with clear explanation of how the code works.
-- Documentation was restructured so a new user can deploy and configure the proxy end-to-end without prior context.
-- User requested explicit token retrieval instructions and simpler Risu settings flow.
+- Risu often sends full system/history each request, creating unnecessary payload and latency.
+- Sending full context once per session preserves role/world initialization while reducing repeated overhead on subsequent turns.
+- Automatic full resend triggers when persona/system context changes, preventing stale prompt behavior.
 
 ## Verification
-- Production deploy completed and aliased:
-  - `https://cai-openai-vercel-proxy-prod-clean.vercel.app`
-- GitHub push completed:
-  - `https://github.com/VolcharaVasiliy/cai-openai-vercel-proxy-risu`
-- Prior behavior checks still valid:
-  - No `Authorization` -> `401 missing_api_key`
-  - With `Authorization` -> normal request processing
+- Syntax checks passed:
+  - `node --check api/v1/chat/completions.js`
+  - `node --check lib/memory.js`
+  - `node --check lib/config.js`
+- Preview deploy:
+  - `https://cai-openai-vercel-proxy-prod-clean-kcc2sre0l.vercel.app`
+- Runtime checks on preview:
+  - No `Authorization` -> `401`
+  - Local memory intents still work (`remember 42` -> `42`).
 
 ## Functions
-- `resolveToken` (`lib/config.js`) - client token first, optional server fallback behind explicit flag.
+- `shouldUseFullContextPrompt` (`api/v1/chat/completions.js`) - chooses full vs compact upstream prompt per session.
+- `buildCompactPrompt` (`api/v1/chat/completions.js`) - compact continuation payload for subsequent turns.
+- `markContextPromptSent` (`api/v1/chat/completions.js`) - tracks prompt strategy state in session cache.
 
 ## Next steps
-- Optional: add release tags and semantic versioning (`v1.0.0`) for stable external sharing.
+- Validate latency/quality in Risu on the preview URL and, if acceptable, roll to production alias.

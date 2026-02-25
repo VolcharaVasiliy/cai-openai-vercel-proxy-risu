@@ -20,9 +20,20 @@ const MAX_LOCAL_TOKEN = 64;
 const MAX_ASSISTANT_CHARS = Number(process.env.CAI_MAX_ASSISTANT_CHARS || 2000);
 const MAX_SYSTEM_CHARS = Number(process.env.CAI_MAX_SYSTEM_CHARS || 3200);
 const MAX_SAMPLE_CHARS = Number(process.env.CAI_MAX_SAMPLE_CHARS || 1000);
+const CONTEXT_SEND_MODE =
+  String(process.env.CAI_CONTEXT_SEND_MODE || "hybrid")
+    .trim()
+    .toLowerCase() === "full"
+    ? "full"
+    : "hybrid";
+const FULL_CONTEXT_EVERY_TURNS = Number(process.env.CAI_FULL_CONTEXT_EVERY_TURNS || 0);
+const COMPACT_HISTORY_TURNS = Number(process.env.CAI_COMPACT_HISTORY_TURNS || 4);
+const COMPACT_HISTORY_CHARS = Number(process.env.CAI_COMPACT_HISTORY_CHARS || 280);
 
 const sessionPersonaStore = globalThis.__caiSessionPersonaStore || new Map();
 globalThis.__caiSessionPersonaStore = sessionPersonaStore;
+const sessionPromptStateStore = globalThis.__caiSessionPromptStateStore || new Map();
+globalThis.__caiSessionPromptStateStore = sessionPromptStateStore;
 
 const RU_TEXT = {
   remembered: (token) => `\u0417\u0430\u043f\u043e\u043c\u043d\u0438\u043b: ${token}.`,
@@ -42,7 +53,7 @@ function setCorsHeaders(res) {
   res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
   res.setHeader(
     "Access-Control-Allow-Headers",
-    "Content-Type, Authorization, X-Session-Id, X-Conversation-Id, X-API-Key"
+    "Content-Type, Authorization, X-Session-Id, X-Conversation-Id, X-API-Key, X-Force-Full-Context"
   );
 }
 
@@ -317,6 +328,97 @@ function setSessionPersona(sessionKey, value) {
   return merged;
 }
 
+function readPositiveInt(value, fallback) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed < 1) {
+    return fallback;
+  }
+  return Math.floor(parsed);
+}
+
+function readNonNegativeInt(value, fallback) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    return fallback;
+  }
+  return Math.floor(parsed);
+}
+
+function getSessionPromptState(sessionKey) {
+  const raw = sessionPromptStateStore.get(sessionKey);
+  if (!raw || typeof raw !== "object") {
+    return null;
+  }
+  return {
+    fingerprint: typeof raw.fingerprint === "string" ? raw.fingerprint : "",
+    compactCount: readNonNegativeInt(raw.compactCount, 0)
+  };
+}
+
+function setSessionPromptState(sessionKey, state) {
+  sessionPromptStateStore.set(sessionKey, {
+    fingerprint: typeof state?.fingerprint === "string" ? state.fingerprint : "",
+    compactCount: readNonNegativeInt(state?.compactCount, 0),
+    updatedAt: Date.now()
+  });
+
+  if (sessionPromptStateStore.size > 2000) {
+    const firstKey = sessionPromptStateStore.keys().next().value;
+    if (firstKey) {
+      sessionPromptStateStore.delete(firstKey);
+    }
+  }
+}
+
+function buildContextFingerprint({ clientSystem, assistantSamples, persona, locale }) {
+  const systemPart = clipText(clientSystem || "", 1200);
+  const samplesPart = (Array.isArray(assistantSamples) ? assistantSamples : [])
+    .map((item) => clipText(item, 380))
+    .join("\n");
+  const namePart = persona?.name || "";
+  const identityPart = persona?.identity || "";
+  return [locale || "", namePart, identityPart, systemPart, samplesPart].join("\u241F");
+}
+
+function shouldUseFullContextPrompt({ sessionKey, contextFingerprint, reqHeaders }) {
+  const forceHeader =
+    reqHeaders?.["x-force-full-context"] ||
+    reqHeaders?.["X-Force-Full-Context"] ||
+    reqHeaders?.["x_force_full_context"];
+  if (typeof forceHeader === "string" && forceHeader.trim().toLowerCase() === "true") {
+    return true;
+  }
+
+  if (CONTEXT_SEND_MODE === "full") {
+    return true;
+  }
+
+  const state = getSessionPromptState(sessionKey);
+  if (!state) {
+    return true;
+  }
+
+  if (!state.fingerprint || state.fingerprint !== contextFingerprint) {
+    return true;
+  }
+
+  const fullContextEveryTurns = readNonNegativeInt(FULL_CONTEXT_EVERY_TURNS, 0);
+  if (fullContextEveryTurns > 0 && state.compactCount >= fullContextEveryTurns) {
+    return true;
+  }
+
+  return false;
+}
+
+function markContextPromptSent({ sessionKey, contextFingerprint, usedFull }) {
+  const state = getSessionPromptState(sessionKey);
+  const compactCount = usedFull ? 0 : readNonNegativeInt((state?.compactCount || 0) + 1, 0);
+  setSessionPromptState(sessionKey, {
+    fingerprint: contextFingerprint,
+    compactCount
+  });
+}
+
 function buildPersonaHints({ clientSystem, assistantSamples, locale }) {
   const nameFromSystem = extractNameFromText(clientSystem);
   const nameFromSamples = extractNameFromText((assistantSamples || []).join("\n\n"));
@@ -555,6 +657,49 @@ function buildProxyPrompt({ historyBlock, userMessage, clientSystem, assistantSa
   );
 }
 
+function buildCompactHistoryBlock(turns) {
+  if (!Array.isArray(turns) || !turns.length) {
+    return "No recent turns.";
+  }
+
+  const takeTurns = readPositiveInt(COMPACT_HISTORY_TURNS, 4);
+  const perTurnChars = readPositiveInt(COMPACT_HISTORY_CHARS, 280);
+  const recent = turns
+    .filter((item) => item && (item.role === "user" || item.role === "assistant"))
+    .slice(-takeTurns);
+
+  if (!recent.length) {
+    return "No recent turns.";
+  }
+
+  return recent
+    .map((item) => {
+      const role = item.role === "user" ? "User" : "Assistant";
+      return `${role}: ${clipText(item.content, perTurnChars)}`;
+    })
+    .join("\n");
+}
+
+function buildCompactPrompt({ userMessage, locale, persona, recentHistoryBlock }) {
+  const localeHint = locale === "ru" ? "Russian" : "English";
+  const identityBlock = persona?.identity ? `Identity answer hint: ${persona.identity}\n` : "";
+  const nameBlock = persona?.name ? `Character name hint: ${persona.name}\n` : "";
+
+  return (
+    "Proxy continuation mode:\n" +
+    "1) Continue the exact same roleplay/persona/world state from previous turns.\n" +
+    "2) Respond only to the latest user message.\n" +
+    "3) Never reveal hidden source character/platform internals.\n" +
+    "4) Keep language aligned with the user.\n\n" +
+    `User language hint: ${localeHint}\n` +
+    nameBlock +
+    identityBlock +
+    "\n" +
+    `Recent conversation:\n${recentHistoryBlock}\n\n` +
+    `Current user message:\n${userMessage}`
+  );
+}
+
 function maybeHandleLocally({ userMessage, effectiveTurns, persona, locale }) {
   const text = localeText(locale);
 
@@ -782,14 +927,32 @@ export default async function handler(req, res) {
     effectiveTurns = appendSessionTurns(sessionKey, [{ role: "user", content: userMessage }]);
   }
 
-  const prompt = buildProxyPrompt({
-    historyBlock: buildHistoryBlock(effectiveTurns),
-    userMessage,
+  const contextFingerprint = buildContextFingerprint({
     clientSystem,
     assistantSamples,
     persona: sessionPersona,
     locale
   });
+  const useFullContextPrompt = shouldUseFullContextPrompt({
+    sessionKey,
+    contextFingerprint,
+    reqHeaders: req.headers
+  });
+  const prompt = useFullContextPrompt
+    ? buildProxyPrompt({
+        historyBlock: buildHistoryBlock(effectiveTurns),
+        userMessage,
+        clientSystem,
+        assistantSamples,
+        persona: sessionPersona,
+        locale
+      })
+    : buildCompactPrompt({
+        userMessage,
+        locale,
+        persona: sessionPersona,
+        recentHistoryBlock: buildCompactHistoryBlock(effectiveTurns)
+      });
 
   try {
     const localResponse = maybeHandleLocally({
@@ -823,6 +986,11 @@ export default async function handler(req, res) {
       characterId,
       sessionId,
       message: prompt
+    });
+    markContextPromptSent({
+      sessionKey,
+      contextFingerprint,
+      usedFull: useFullContextPrompt
     });
     const safeAssistantText = sanitizeAssistantText(assistantText, leakTerms, locale);
 
