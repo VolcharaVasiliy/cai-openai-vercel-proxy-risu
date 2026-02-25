@@ -3,7 +3,10 @@ import { getDefaultModel, listModels, resolveCharacterId, resolveSessionId, reso
 import { appendSessionTurns, getSessionTurns, makeSessionKey, setSessionTurns } from "../../../lib/memory.js";
 import { buildChatCompletion, buildChatCompletionFromList, writeSingleChunkSSE } from "../../../lib/openai-format.js";
 
-const MAX_ASSISTANT_CHARS = Number(process.env.CAI_MAX_ASSISTANT_CHARS || 2000);
+const MAX_ASSISTANT_CHARS = Number(process.env.CAI_MAX_ASSISTANT_CHARS || 8000);
+
+const sessionRuntimeStore = globalThis.__caiSessionRuntimeStore || new Map();
+globalThis.__caiSessionRuntimeStore = sessionRuntimeStore;
 
 function setCorsHeaders(res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
@@ -71,15 +74,51 @@ function getLastUserMessage(messages) {
   return "";
 }
 
-function buildUpstreamPrompt(messages) {
-  if (!Array.isArray(messages) || !messages.length) {
-    return "";
+function splitIncomingMessages(messages) {
+  const systems = [];
+  const turns = [];
+
+  for (const message of messages) {
+    if (!message || !message.content) {
+      continue;
+    }
+
+    if (message.role === "system") {
+      systems.push(message.content);
+      continue;
+    }
+
+    if (message.role === "user" || message.role === "assistant") {
+      turns.push({
+        role: message.role,
+        content: message.content
+      });
+    }
   }
 
-  return messages
-    .filter((msg) => msg && (msg.role === "system" || msg.role === "user" || msg.role === "assistant") && msg.content)
-    .map((msg) => `${msg.role.toUpperCase()}:\n${msg.content}`)
-    .join("\n\n");
+  return {
+    systemText: systems.join("\n\n").trim(),
+    turns
+  };
+}
+
+function buildTranscriptPrompt({ systemText, turns }) {
+  const parts = [];
+
+  if (typeof systemText === "string" && systemText.trim()) {
+    parts.push(`SYSTEM:\n${systemText.trim()}`);
+  }
+
+  if (Array.isArray(turns)) {
+    for (const turn of turns) {
+      if (!turn || !turn.content || (turn.role !== "user" && turn.role !== "assistant")) {
+        continue;
+      }
+      parts.push(`${turn.role.toUpperCase()}:\n${turn.content}`);
+    }
+  }
+
+  return parts.join("\n\n").trim();
 }
 
 function isAppendOnly(previousTurns, nextTurns) {
@@ -126,6 +165,36 @@ function clampAssistantText(text) {
     return value;
   }
   return `${value.slice(0, MAX_ASSISTANT_CHARS)}...`;
+}
+
+function getRuntimeState(sessionKey) {
+  const raw = sessionRuntimeStore.get(sessionKey);
+  if (!raw || typeof raw !== "object") {
+    return {
+      bootstrapped: false,
+      systemText: ""
+    };
+  }
+
+  return {
+    bootstrapped: raw.bootstrapped === true,
+    systemText: typeof raw.systemText === "string" ? raw.systemText : ""
+  };
+}
+
+function setRuntimeState(sessionKey, state) {
+  sessionRuntimeStore.set(sessionKey, {
+    bootstrapped: state?.bootstrapped === true,
+    systemText: typeof state?.systemText === "string" ? state.systemText : "",
+    updatedAt: Date.now()
+  });
+
+  if (sessionRuntimeStore.size > 2000) {
+    const firstKey = sessionRuntimeStore.keys().next().value;
+    if (firstKey) {
+      sessionRuntimeStore.delete(firstKey);
+    }
+  }
 }
 
 export default async function handler(req, res) {
@@ -222,22 +291,62 @@ export default async function handler(req, res) {
   );
   const sessionKey = makeSessionKey({ token, model, sessionId });
 
+  const runtime = getRuntimeState(sessionKey);
   const previousTurns = getSessionTurns(sessionKey).filter(
-    (item) => item && (item.role === "system" || item.role === "user" || item.role === "assistant") && item.content
+    (item) => item && (item.role === "user" || item.role === "assistant") && item.content
   );
 
-  let effectiveTurns;
-  let resetConversation = false;
+  const { systemText: incomingSystemText, turns: incomingTurns } = splitIncomingMessages(normalizedMessages);
+  const systemText = incomingSystemText || runtime.systemText || "";
+  const systemChanged = Boolean(incomingSystemText && incomingSystemText !== runtime.systemText);
+  const incomingHasHistory = incomingTurns.length > 1 || incomingTurns.some((item) => item.role === "assistant");
 
-  if (normalizedMessages.length > 1) {
-    resetConversation = shouldResetConversation(previousTurns, normalizedMessages);
-    effectiveTurns = setSessionTurns(sessionKey, normalizedMessages);
+  let effectiveTurns = previousTurns;
+  let resetConversation = false;
+  let fullSyncNeeded = runtime.bootstrapped !== true;
+
+  if (incomingHasHistory) {
+    const rewritten = shouldResetConversation(previousTurns, incomingTurns);
+    effectiveTurns = setSessionTurns(sessionKey, incomingTurns);
+
+    if (rewritten) {
+      resetConversation = true;
+      fullSyncNeeded = true;
+    }
+
+    if (runtime.bootstrapped === false) {
+      fullSyncNeeded = true;
+    }
   } else {
-    effectiveTurns = appendSessionTurns(sessionKey, [{ role: "user", content: userMessage }]);
+    const lastStored = previousTurns[previousTurns.length - 1];
+    const isDuplicateUser = lastStored?.role === "user" && lastStored.content === userMessage;
+
+    if (!isDuplicateUser) {
+      effectiveTurns = appendSessionTurns(sessionKey, [{ role: "user", content: userMessage }]);
+    }
+
+    if (runtime.bootstrapped === false) {
+      fullSyncNeeded = true;
+    }
   }
 
-  const upstreamPrompt = buildUpstreamPrompt(effectiveTurns);
-  if (!upstreamPrompt) {
+  if (systemChanged && runtime.bootstrapped) {
+    resetConversation = true;
+    fullSyncNeeded = true;
+  }
+
+  let upstreamMessage = "";
+  if (fullSyncNeeded) {
+    const turnsForSync = incomingHasHistory ? incomingTurns : effectiveTurns;
+    upstreamMessage = buildTranscriptPrompt({
+      systemText,
+      turns: turnsForSync
+    });
+  } else {
+    upstreamMessage = userMessage;
+  }
+
+  if (!upstreamMessage) {
     res.status(400).json({
       error: {
         message: "No valid messages to send upstream",
@@ -253,12 +362,19 @@ export default async function handler(req, res) {
       token,
       characterId,
       sessionId,
-      message: upstreamPrompt,
+      message: upstreamMessage,
       resetConversation
     });
 
     const safeAssistantText = clampAssistantText(assistantText);
-    appendSessionTurns(sessionKey, [{ role: "assistant", content: safeAssistantText }]);
+    if (safeAssistantText) {
+      appendSessionTurns(sessionKey, [{ role: "assistant", content: safeAssistantText }]);
+    }
+
+    setRuntimeState(sessionKey, {
+      bootstrapped: true,
+      systemText
+    });
 
     if (stream) {
       writeSingleChunkSSE(res, { model, content: safeAssistantText });

@@ -1,21 +1,26 @@
 ﻿# Report - cai-openai-vercel-proxy-prod-clean - 2026-02-25
 
 ## Summary
-- Removed proxy-authored roleplay policy prompts from upstream request construction.
-- Switched upstream payload generation to direct transcript pass-through from incoming Risu/OpenAI messages (`system/user/assistant`).
-- Added conversation reset on non-append history rewrites to improve delete/regenerate behavior.
+- Fixed role/history regression where continuation could collapse and behave like single-turn overwrite.
+- Removed proxy-authored policy prompts from upstream path; only client transcript content is forwarded.
+- Added sync strategy: full transcript sync on first turn/rewrite, then latest-user-only continuation.
 
 ## Files
-- `api/v1/chat/completions.js` - rewritten chat pipeline to remove custom policy/persona prompt layers; now serializes incoming messages directly; detects history rewrite and requests upstream conversation reset.
-- `lib/cai.js` - `sendCharacterMessage` extended with optional `resetConversation` flag; performs best-effort `create_new_conversation` before send.
-- `.env.example` - removed hybrid-context tuning envs no longer used.
-- `README.md` - updated flow docs: no proxy policy prompt, direct transcript forwarding, and rewrite-reset behavior.
-- `REPORT.md` - updated with this fix pass.
+- `api/v1/chat/completions.js` - reworked session flow:
+  - separates `system` and `user/assistant` turns,
+  - keeps runtime session state,
+  - performs full transcript sync only when needed,
+  - preserves separate user/assistant turns,
+  - resets upstream conversation on rewritten history.
+- `lib/cai.js` - keeps `resetConversation` support to recreate conversation branch when history is edited/regenerated.
+- `lib/memory.js` - increased default per-message memory cap to reduce truncation of long roleplay entries.
+- `.env.example` - updated `CAI_MEMORY_MAX_CHARS` default guidance.
+- `README.md` - updated request-flow explanation and memory default.
 
 ## Rationale
-- User requirement: only Risu prompt/content should be sent, without extra proxy-authored prompt policy.
-- Reported bug: each turn behaved like single-message overwrite after previous optimization pass.
-- Direct transcript forwarding with rewrite detection is more compatible with Risu full-history mode and message edits.
+- User reported critical behavior: assistant/user role flow broke and character definition/greeting context was not reliably preserved.
+- Root causes were mixed history-source assumptions and aggressive truncation for long narrative/system content.
+- New logic prioritizes stable continuation while still supporting regenerate/delete rewrite scenarios.
 
 ## Verification
 - Syntax checks passed:
@@ -23,14 +28,15 @@
   - `node --check lib/cai.js`
   - `node --check lib/memory.js`
   - `node --check lib/config.js`
-- Local behavior checks:
-  - No `Authorization` -> `401 missing_api_key`
+- Auth behavior check retained:
+  - no `Authorization` -> `401 missing_api_key`
 
 ## Functions
-- `buildUpstreamPrompt` (`api/v1/chat/completions.js`) - builds upstream text strictly from incoming normalized messages.
-- `shouldResetConversation` (`api/v1/chat/completions.js`) - detects non-append history rewrite cases.
-- `sendCharacterMessage(..., resetConversation)` (`lib/cai.js`) - optionally resets c.ai conversation before send.
+- `splitIncomingMessages` (`api/v1/chat/completions.js`) - separates system context from dialogue turns.
+- `shouldResetConversation` (`api/v1/chat/completions.js`) - detects non-append rewrite cases.
+- `buildTranscriptPrompt` (`api/v1/chat/completions.js`) - full-sync transcript serialization with explicit role blocks.
+- `sendCharacterMessage(..., resetConversation)` (`lib/cai.js`) - reset-capable upstream send.
 
 ## Next steps
-- Validate in Risu on preview URL for normal turn continuation and regenerate/delete flows.
-- If stable, roll to production alias and keep this as default behavior.
+- Validate on preview in Risu with long system + greeting + multi-turn continuation.
+- If stable, roll this build to production alias.

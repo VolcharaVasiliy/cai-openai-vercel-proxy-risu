@@ -47,9 +47,10 @@ Compatibility aliases:
 2. Proxy validates `model`, messages, and user token (`Authorization: Bearer <cai_token>`).
 3. Proxy resolves character by alias (`CAI_MODEL_ALIAS` / `CAI_MODEL_MAP_JSON`).
 4. Proxy merges/synchronizes session history (`X-Session-Id` or `user`).
-5. Proxy serializes Risu/OpenAI messages as-is (system/user/assistant) and sends that transcript upstream.
-6. Proxy sends message to c.ai via `cainode`.
-7. Proxy returns OpenAI-compatible response JSON.
+5. On first turn (or after regenerate/delete rewrite), proxy syncs full transcript (`system/user/assistant`) upstream.
+6. On normal continuation turns, proxy sends only latest user message to keep c.ai conversation state stable.
+7. Proxy sends message to c.ai via `cainode`.
+8. Proxy returns OpenAI-compatible response JSON.
 
 ## Core files and responsibilities
 
@@ -114,7 +115,7 @@ Optional:
 - `CAI_TOKEN=<token>`
 - `CAI_LEAK_GUARD_TERMS=term1,term2`
 - `CAI_MEMORY_MAX_TURNS=24`
-- `CAI_MEMORY_MAX_CHARS=1200`
+- `CAI_MEMORY_MAX_CHARS=8000`
 - `CAI_REQUEST_TIMEOUT_MS=60000`
 - `CAI_CONNECT_TIMEOUT_MS=45000`
 
