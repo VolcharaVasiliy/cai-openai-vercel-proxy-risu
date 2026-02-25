@@ -1,0 +1,15 @@
+{
+  "name": "cai-openai-vercel-proxy",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vercel dev",
+    "dev:local": "node local-preview-server.mjs",
+    "start": "vercel dev",
+    "check": "node --check api/v1/chat/completions.js && node --check api/v1/models.js && node --check api/v1/health.js && node --check lib/config.js && node --check lib/cai.js && node --check lib/openai-format.js && node --check lib/memory.js"
+  },
+  "dependencies": {
+    "cainode": "latest"
+  }
+}

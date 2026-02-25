@@ -1,0 +1,29 @@
+{
+  "version": 2,
+  "rewrites": [
+    {
+      "source": "/v1/chat/completions",
+      "destination": "/api/v1/chat/completions"
+    },
+    {
+      "source": "/v1/models",
+      "destination": "/api/v1/models"
+    },
+    {
+      "source": "/v1/health",
+      "destination": "/api/v1/health"
+    },
+    {
+      "source": "/chat/completions",
+      "destination": "/api/v1/chat/completions"
+    },
+    {
+      "source": "/models",
+      "destination": "/api/v1/models"
+    },
+    {
+      "source": "/health",
+      "destination": "/api/v1/health"
+    }
+  ]
+}

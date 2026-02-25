@@ -1,0 +1,378 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Risu-Ready c.ai Proxy</title>
+    <style>
+      :root {
+        --bg: #f5f7fb;
+        --panel: #ffffff;
+        --ink: #101828;
+        --subtle: #475467;
+        --line: #d0d5dd;
+        --good: #067647;
+        --bad: #b42318;
+        --accent: #155eef;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        color: var(--ink);
+        background:
+          radial-gradient(circle at 0% 0%, #dbeafe 0%, transparent 38%),
+          radial-gradient(circle at 100% 0%, #d1fadf 0%, transparent 42%),
+          var(--bg);
+        font-family: "Segoe UI Variable", "Segoe UI", "Inter", sans-serif;
+      }
+
+      .wrap {
+        max-width: 980px;
+        margin: 0 auto;
+        padding: 28px 16px 64px;
+      }
+
+      h1 {
+        margin: 0;
+        font-size: 32px;
+        letter-spacing: -0.02em;
+      }
+
+      .sub {
+        color: var(--subtle);
+        margin-top: 8px;
+      }
+
+      .grid {
+        margin-top: 18px;
+        display: grid;
+        gap: 12px;
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      }
+
+      .card {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        padding: 14px;
+      }
+
+      .label {
+        color: var(--subtle);
+        font-size: 13px;
+      }
+
+      .value {
+        margin-top: 8px;
+        font-weight: 650;
+        word-break: break-word;
+      }
+
+      .ok {
+        color: var(--good);
+      }
+
+      .bad {
+        color: var(--bad);
+      }
+
+      .section {
+        margin-top: 18px;
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        padding: 16px;
+      }
+
+      h2 {
+        margin: 0 0 10px;
+        font-size: 18px;
+      }
+
+      ol {
+        margin: 0;
+        padding-left: 20px;
+      }
+
+      li {
+        margin: 6px 0;
+      }
+
+      code {
+        background: #eef2ff;
+        border: 1px solid #c7d2fe;
+        border-radius: 6px;
+        padding: 2px 6px;
+        font-family: "Cascadia Code", "Fira Code", monospace;
+        font-size: 12px;
+      }
+
+      .row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        margin-top: 10px;
+        align-items: center;
+      }
+
+      input,
+      textarea,
+      select,
+      button {
+        border-radius: 8px;
+        border: 1px solid var(--line);
+        padding: 9px 10px;
+        font: inherit;
+      }
+
+      input,
+      textarea,
+      select {
+        width: 100%;
+        background: #fff;
+      }
+
+      textarea {
+        min-height: 84px;
+        resize: vertical;
+      }
+
+      button {
+        cursor: pointer;
+        background: var(--accent);
+        color: #fff;
+        border: none;
+        font-weight: 600;
+      }
+
+      .ghost {
+        background: #fff;
+        color: var(--ink);
+        border: 1px solid var(--line);
+      }
+
+      .mono {
+        font-family: "Cascadia Code", "Fira Code", monospace;
+      }
+
+      .out {
+        margin-top: 10px;
+        border: 1px solid var(--line);
+        background: #f8fafc;
+        border-radius: 10px;
+        padding: 10px;
+        white-space: pre-wrap;
+      }
+
+      .tiny {
+        color: var(--subtle);
+        font-size: 12px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <h1>Risu-Ready c.ai Proxy</h1>
+      <div class="sub">OpenAI-compatible endpoint for Risu with setup guide and quick checks.</div>
+
+      <div class="grid">
+        <div class="card">
+          <div class="label">Base URL</div>
+          <div class="value mono" id="baseUrl"></div>
+        </div>
+        <div class="card">
+          <div class="label">Chat Endpoint</div>
+          <div class="value mono" id="chatEndpoint"></div>
+        </div>
+        <div class="card">
+          <div class="label">Health</div>
+          <div class="value" id="healthState">Checking...</div>
+        </div>
+        <div class="card">
+          <div class="label">Configured Models</div>
+          <div class="value mono" id="modelList">Loading...</div>
+        </div>
+      </div>
+
+      <div class="section">
+        <h2>Risu Setup</h2>
+        <ol>
+          <li>Open Risu settings and set AI model to <code>reverse_proxy</code>.</li>
+          <li>Set URL to <code id="baseUrlInline"></code> (base URL only).</li>
+          <li>Set Key/Password:
+            if server has <code>CAI_TOKEN</code>, key can be empty; otherwise use your c.ai token.
+          </li>
+          <li>Set Request Model to one alias from <code>/v1/models</code> (example: <code id="defaultModel">cai-default</code>).</li>
+          <li>Set Format to <code>OpenAI Compatible</code>.</li>
+          <li>Keep <code>Autofill Request URL</code> enabled (Risu appends <code>/v1/chat/completions</code> automatically).</li>
+        </ol>
+        <div class="tiny" style="margin-top:10px">
+          Risu already manages chat history on its side; this proxy accepts normal OpenAI message arrays.
+        </div>
+      </div>
+
+      <div class="section">
+        <h2>Config Check</h2>
+        <div class="row">
+          <input id="apiKey" placeholder="Optional API key for live check and test chat (if CAI_TOKEN is not set on server)" />
+          <button id="liveCheckBtn">Run Live Check</button>
+        </div>
+        <div class="out mono" id="liveCheckOut">No live check yet.</div>
+      </div>
+
+      <div class="section">
+        <h2>Test Chat</h2>
+        <div class="row">
+          <select id="modelSelect"></select>
+          <input id="sessionId" value="guide-test-session" />
+        </div>
+        <textarea id="prompt">Коротко: подтверди, что API работает.</textarea>
+        <div class="row">
+          <button id="sendBtn">Send Test Request</button>
+          <button id="copyCurlBtn" class="ghost">Copy curl</button>
+        </div>
+        <div class="out mono" id="chatOut">No test run yet.</div>
+      </div>
+    </div>
+
+    <script>
+      const base = window.location.origin;
+      const chatUrl = `${base}/v1/chat/completions`;
+      const modelsUrl = `${base}/v1/models`;
+      const healthUrl = `${base}/v1/health`;
+
+      const el = {
+        baseUrl: document.getElementById("baseUrl"),
+        baseUrlInline: document.getElementById("baseUrlInline"),
+        chatEndpoint: document.getElementById("chatEndpoint"),
+        healthState: document.getElementById("healthState"),
+        modelList: document.getElementById("modelList"),
+        modelSelect: document.getElementById("modelSelect"),
+        defaultModel: document.getElementById("defaultModel"),
+        apiKey: document.getElementById("apiKey"),
+        liveCheckBtn: document.getElementById("liveCheckBtn"),
+        liveCheckOut: document.getElementById("liveCheckOut"),
+        sessionId: document.getElementById("sessionId"),
+        prompt: document.getElementById("prompt"),
+        sendBtn: document.getElementById("sendBtn"),
+        copyCurlBtn: document.getElementById("copyCurlBtn"),
+        chatOut: document.getElementById("chatOut")
+      };
+
+      el.baseUrl.textContent = base;
+      el.baseUrlInline.textContent = base;
+      el.chatEndpoint.textContent = chatUrl;
+
+      function authHeaders() {
+        const key = el.apiKey.value.trim();
+        return key ? { Authorization: `Bearer ${key}` } : {};
+      }
+
+      async function loadHealth() {
+        try {
+          const res = await fetch(healthUrl);
+          const dat = await res.json();
+          const ok = dat?.status === "ok" && dat?.checks?.endpoint_ready;
+          el.healthState.textContent = ok ? "Ready" : "Needs setup";
+          el.healthState.className = `value ${ok ? "ok" : "bad"}`;
+          if (dat?.risu?.recommended_model) {
+            el.defaultModel.textContent = dat.risu.recommended_model;
+          }
+        } catch (err) {
+          el.healthState.textContent = `Error: ${err?.message || err}`;
+          el.healthState.className = "value bad";
+        }
+      }
+
+      async function loadModels() {
+        try {
+          const res = await fetch(modelsUrl);
+          const dat = await res.json();
+          const models = Array.isArray(dat?.data) ? dat.data.map((m) => m.id) : [];
+          el.modelList.textContent = models.length ? models.join(", ") : "No models configured";
+          el.modelSelect.innerHTML = "";
+          if (!models.length) {
+            const opt = document.createElement("option");
+            opt.value = "cai-default";
+            opt.textContent = "cai-default";
+            el.modelSelect.appendChild(opt);
+          } else {
+            for (const m of models) {
+              const opt = document.createElement("option");
+              opt.value = m;
+              opt.textContent = m;
+              el.modelSelect.appendChild(opt);
+            }
+            el.defaultModel.textContent = models[0];
+          }
+        } catch (err) {
+          el.modelList.textContent = `Error: ${err?.message || err}`;
+        }
+      }
+
+      async function runLiveCheck() {
+        el.liveCheckOut.textContent = "Running live check...";
+        try {
+          const res = await fetch(`${healthUrl}?live=1`, {
+            headers: authHeaders()
+          });
+          const dat = await res.json();
+          el.liveCheckOut.textContent = JSON.stringify(dat, null, 2);
+        } catch (err) {
+          el.liveCheckOut.textContent = `Live check failed: ${err?.message || err}`;
+        }
+      }
+
+      async function sendTest() {
+        el.chatOut.textContent = "Sending test request...";
+        const body = {
+          model: el.modelSelect.value,
+          stream: false,
+          user: el.sessionId.value || "guide-session",
+          messages: [{ role: "user", content: el.prompt.value || "ping" }]
+        };
+        try {
+          const res = await fetch(chatUrl, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "X-Session-Id": body.user,
+              ...authHeaders()
+            },
+            body: JSON.stringify(body)
+          });
+          const dat = await res.json();
+          el.chatOut.textContent = JSON.stringify(dat, null, 2);
+        } catch (err) {
+          el.chatOut.textContent = `Test failed: ${err?.message || err}`;
+        }
+      }
+
+      async function copyCurl() {
+        const model = el.modelSelect.value || "cai-default";
+        const prompt = (el.prompt.value || "ping").replace(/'/g, "\\'");
+        const key = el.apiKey.value.trim() || "YOUR_PROXY_OR_CAI_TOKEN";
+        const sid = (el.sessionId.value || "guide-session").replace(/'/g, "");
+
+        const curl = `curl -X POST ${chatUrl} \\
+  -H "Content-Type: application/json" \\
+  -H "Authorization: Bearer ${key}" \\
+  -H "X-Session-Id: ${sid}" \\
+  -d '{"model":"${model}","stream":false,"messages":[{"role":"user","content":"${prompt}"}]}'`;
+        await navigator.clipboard.writeText(curl);
+        el.chatOut.textContent = "curl copied to clipboard.";
+      }
+
+      el.liveCheckBtn.addEventListener("click", runLiveCheck);
+      el.sendBtn.addEventListener("click", sendTest);
+      el.copyCurlBtn.addEventListener("click", copyCurl);
+
+      loadHealth();
+      loadModels();
+    </script>
+  </body>
+</html>
