@@ -51,9 +51,10 @@ Compatibility aliases:
 4. Proxy merges/synchronizes session history (`X-Session-Id` or `user`).
 5. On first message in a session, proxy sends full transcript with `system + user/assistant` turns.
 6. On next messages, proxy sends only the latest user message for speed.
-7. If incoming history differs from stored history (non-append), proxy keeps stored history and continues from latest user turn to avoid accidental context wipe.
-8. Proxy sends message to c.ai via `cainode`.
-9. Proxy returns OpenAI-compatible response JSON.
+7. If incoming history is a valid rewrite (regenerate/delete/edit near chat tail), proxy applies it and re-syncs upstream branch.
+8. If incoming history is non-append but not a valid rewrite, proxy keeps stored history and continues from latest user turn to avoid accidental context wipe.
+9. Proxy sends message to c.ai via `cainode`.
+10. Proxy returns OpenAI-compatible response JSON.
 
 ## Core files and responsibilities
 

@@ -280,6 +280,84 @@ function isAppendOnly(previousTurns, nextTurns) {
   return true;
 }
 
+function commonPrefixLength(previousTurns, nextTurns) {
+  if (!Array.isArray(previousTurns) || !Array.isArray(nextTurns)) {
+    return 0;
+  }
+
+  const limit = Math.min(previousTurns.length, nextTurns.length);
+  let matched = 0;
+  for (let i = 0; i < limit; i += 1) {
+    const prev = previousTurns[i];
+    const next = nextTurns[i];
+    if (!prev || !next || prev.role !== next.role || prev.content !== next.content) {
+      break;
+    }
+    matched += 1;
+  }
+  return matched;
+}
+
+function hasExplicitRewriteSignal(body) {
+  if (!body || typeof body !== "object") {
+    return false;
+  }
+
+  const booleanSignals = [
+    "regenerate",
+    "is_regenerate",
+    "isRegenerate",
+    "is_regen",
+    "isRegen",
+    "rewrite",
+    "is_rewrite",
+    "isRewrite",
+    "edited",
+    "is_edited",
+    "isEdited",
+    "deleted",
+    "is_deleted",
+    "isDeleted",
+    "replace_last",
+    "replaceLast"
+  ];
+
+  for (const key of booleanSignals) {
+    if (body[key] === true) {
+      return true;
+    }
+  }
+
+  const textSignals = [body.action, body.operation, body.event, body.mode]
+    .filter((value) => typeof value === "string")
+    .map((value) => value.trim().toLowerCase());
+  if (textSignals.some((value) => /(regen|regenerate|rewrite|edit|delete|remove)/.test(value))) {
+    return true;
+  }
+
+  return false;
+}
+
+function shouldApplyRewrite(previousTurns, nextTurns, body) {
+  if (!Array.isArray(previousTurns) || !previousTurns.length) {
+    return false;
+  }
+  if (!Array.isArray(nextTurns) || !nextTurns.length) {
+    return false;
+  }
+
+  if (hasExplicitRewriteSignal(body)) {
+    return true;
+  }
+
+  const prefix = commonPrefixLength(previousTurns, nextTurns);
+  const minLen = Math.min(previousTurns.length, nextTurns.length);
+  const nearTailRewrite = prefix >= 2 && prefix >= minLen - 2;
+  const substantialIncoming = nextTurns.length >= 3 || nextTurns.some((item) => item.role === "assistant");
+
+  return nearTailRewrite && substantialIncoming;
+}
+
 function ensureTrailingUserTurn(turns, userMessage) {
   const normalizedTurns = Array.isArray(turns)
     ? turns.filter((item) => item && (item.role === "user" || item.role === "assistant") && item.content)
@@ -451,6 +529,10 @@ export default async function handler(req, res) {
       effectiveTurns = setSessionTurns(sessionKey, normalizedIncomingTurns);
     } else if (isAppendOnly(previousTurns, normalizedIncomingTurns)) {
       effectiveTurns = setSessionTurns(sessionKey, normalizedIncomingTurns);
+    } else if (shouldApplyRewrite(previousTurns, normalizedIncomingTurns, body)) {
+      effectiveTurns = setSessionTurns(sessionKey, normalizedIncomingTurns);
+      resetConversation = true;
+      fullSyncNeeded = true;
     } else {
       const lastStored = previousTurns[previousTurns.length - 1];
       const isDuplicateUser = lastStored?.role === "user" && lastStored.content === userMessage;
