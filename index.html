@@ -1,4 +1,4 @@
-<!doctype html>
+﻿<!doctype html>
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
@@ -201,14 +201,12 @@
       <div class="section">
         <h2>Risu Setup</h2>
         <ol>
-          <li>Open Risu settings and set AI model to <code>reverse_proxy</code>.</li>
-          <li>Set URL to <code id="baseUrlInline"></code> (base URL only).</li>
-          <li>Set Key/Password:
-            if server has <code>CAI_TOKEN</code>, key can be empty; otherwise use your c.ai token.
-          </li>
+          <li>Open Risu settings and set provider to <code>OpenAI Compatible</code>.</li>
+          <li>Set URL to <code id="chatEndpointInline"></code>.</li>
+          <li>Set Key/Password to your c.ai token (<code>authorization</code> from DevTools).</li>
           <li>Set Request Model to one alias from <code>/v1/models</code> (example: <code id="defaultModel">cai-default</code>).</li>
           <li>Set Format to <code>OpenAI Compatible</code>.</li>
-          <li>Keep <code>Autofill Request URL</code> enabled (Risu appends <code>/v1/chat/completions</code> automatically).</li>
+          <li>Disable <code>reverse_proxy</code> mode for this endpoint.</li>
         </ol>
         <div class="tiny" style="margin-top:10px">
           Risu already manages chat history on its side; this proxy accepts normal OpenAI message arrays.
@@ -247,8 +245,8 @@
 
       const el = {
         baseUrl: document.getElementById("baseUrl"),
-        baseUrlInline: document.getElementById("baseUrlInline"),
         chatEndpoint: document.getElementById("chatEndpoint"),
+        chatEndpointInline: document.getElementById("chatEndpointInline"),
         healthState: document.getElementById("healthState"),
         modelList: document.getElementById("modelList"),
         modelSelect: document.getElementById("modelSelect"),
@@ -264,8 +262,8 @@
       };
 
       el.baseUrl.textContent = base;
-      el.baseUrlInline.textContent = base;
       el.chatEndpoint.textContent = chatUrl;
+      el.chatEndpointInline.textContent = chatUrl;
 
       function authHeaders() {
         const key = el.apiKey.value.trim();
@@ -376,3 +374,4 @@
     </script>
   </body>
 </html>
+

@@ -1,42 +1,35 @@
 ﻿# Report - cai-openai-vercel-proxy-prod-clean - 2026-02-25
 
 ## Summary
-- Fixed role/history regression where continuation could collapse and behave like single-turn overwrite.
-- Removed proxy-authored policy prompts from upstream path; only client transcript content is forwarded.
-- Added sync strategy: full transcript sync on first turn/rewrite, then latest-user-only continuation.
+- Fixed broken `cai-default` model resolution by adding an internal placeholder mapping.
+- Set new default placeholder character to `-EPBbF-2JeZep6sjrXfQ0aB_UdIZl4tSBwOwnNUB_F4`.
+- Fixed chat routing docs/UI hints and continued history logic to avoid context overwrite.
 
 ## Files
-- `api/v1/chat/completions.js` - reworked session flow:
-  - separates `system` and `user/assistant` turns,
-  - keeps runtime session state,
-  - performs full transcript sync only when needed,
-  - preserves separate user/assistant turns,
-  - resets upstream conversation on rewritten history.
-- `lib/cai.js` - keeps `resetConversation` support to recreate conversation branch when history is edited/regenerated.
-- `lib/memory.js` - increased default per-message memory cap to reduce truncation of long roleplay entries.
-- `.env.example` - updated `CAI_MEMORY_MAX_CHARS` default guidance.
-- `README.md` - updated request-flow explanation and memory default.
+- `lib/config.js` - added fallback mapping for `cai-default` to the new placeholder character when env mapping is absent.
+- `api/v1/chat/completions.js` - stabilized turn handling:
+  - keeps `system` from client only,
+  - ensures latest user turn is present before upstream send,
+  - resets upstream only for rewritten histories (not on repeated system block).
+- `api/v1/health.js` - removed stale persona dependency and aligned provider hint with OpenAI-compatible usage.
+- `index.html` - fixed setup guide for Risu (`OpenAI Compatible` + full chat endpoint URL), fixed broken Cyrillic sample text.
+- `.env.example` - documented built-in placeholder and optional overrides.
+- `README.md` - updated default placeholder behavior and request-flow description.
 
 ## Rationale
-- User reported critical behavior: assistant/user role flow broke and character definition/greeting context was not reliably preserved.
-- Root causes were mixed history-source assumptions and aggressive truncation for long narrative/system content.
-- New logic prioritizes stable continuation while still supporting regenerate/delete rewrite scenarios.
+- Preview deployments had no Vercel env vars, causing `Unknown model "cai-default"` and a hard failure.
+- Risu sends system blocks frequently; resetting upstream on every system delta caused context collapse.
+- Placeholder had to be switched to the new requested character id globally.
 
-## Verification
-- Syntax checks passed:
-  - `node --check api/v1/chat/completions.js`
-  - `node --check lib/cai.js`
-  - `node --check lib/memory.js`
-  - `node --check lib/config.js`
-- Auth behavior check retained:
-  - no `Authorization` -> `401 missing_api_key`
+## Issues
+- Vercel project currently has no configured env vars; without code fallback this breaks model resolution.
+- Fixed by code-level default mapping and by preparing env update/deploy flow.
 
 ## Functions
-- `splitIncomingMessages` (`api/v1/chat/completions.js`) - separates system context from dialogue turns.
-- `shouldResetConversation` (`api/v1/chat/completions.js`) - detects non-append rewrite cases.
-- `buildTranscriptPrompt` (`api/v1/chat/completions.js`) - full-sync transcript serialization with explicit role blocks.
-- `sendCharacterMessage(..., resetConversation)` (`lib/cai.js`) - reset-capable upstream send.
+- `ensureTrailingUserTurn` (`api/v1/chat/completions.js`) - guarantees current user message is included in upstream transcript.
+- `shouldResetConversation` (`api/v1/chat/completions.js`) - triggers reset only on non-append rewrites.
+- `resolveCharacterId` / model map bootstrap (`lib/config.js`) - now always resolves `cai-default` via env mapping or placeholder fallback.
 
 ## Next steps
-- Validate on preview in Risu with long system + greeting + multi-turn continuation.
-- If stable, roll this build to production alias.
+- Redeploy preview and verify `/v1/models` returns `cai-default`.
+- Verify in Risu with multi-turn and regenerate/delete scenarios.

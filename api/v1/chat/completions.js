@@ -156,6 +156,23 @@ function shouldResetConversation(previousTurns, nextTurns) {
   return !isAppendOnly(previousTurns, nextTurns);
 }
 
+function ensureTrailingUserTurn(turns, userMessage) {
+  const normalizedTurns = Array.isArray(turns)
+    ? turns.filter((item) => item && (item.role === "user" || item.role === "assistant") && item.content)
+    : [];
+
+  if (!userMessage) {
+    return normalizedTurns;
+  }
+
+  const last = normalizedTurns[normalizedTurns.length - 1];
+  if (last?.role === "user" && last.content === userMessage) {
+    return normalizedTurns;
+  }
+
+  return normalizedTurns.concat([{ role: "user", content: userMessage }]);
+}
+
 function clampAssistantText(text) {
   const value = typeof text === "string" ? text.trim() : "";
   if (!value) {
@@ -171,20 +188,17 @@ function getRuntimeState(sessionKey) {
   const raw = sessionRuntimeStore.get(sessionKey);
   if (!raw || typeof raw !== "object") {
     return {
-      bootstrapped: false,
       systemText: ""
     };
   }
 
   return {
-    bootstrapped: raw.bootstrapped === true,
     systemText: typeof raw.systemText === "string" ? raw.systemText : ""
   };
 }
 
 function setRuntimeState(sessionKey, state) {
   sessionRuntimeStore.set(sessionKey, {
-    bootstrapped: state?.bootstrapped === true,
     systemText: typeof state?.systemText === "string" ? state.systemText : "",
     updatedAt: Date.now()
   });
@@ -298,25 +312,16 @@ export default async function handler(req, res) {
 
   const { systemText: incomingSystemText, turns: incomingTurns } = splitIncomingMessages(normalizedMessages);
   const systemText = incomingSystemText || runtime.systemText || "";
-  const systemChanged = Boolean(incomingSystemText && incomingSystemText !== runtime.systemText);
   const incomingHasHistory = incomingTurns.length > 1 || incomingTurns.some((item) => item.role === "assistant");
 
   let effectiveTurns = previousTurns;
   let resetConversation = false;
-  let fullSyncNeeded = runtime.bootstrapped !== true;
 
   if (incomingHasHistory) {
-    const rewritten = shouldResetConversation(previousTurns, incomingTurns);
-    effectiveTurns = setSessionTurns(sessionKey, incomingTurns);
-
-    if (rewritten) {
-      resetConversation = true;
-      fullSyncNeeded = true;
-    }
-
-    if (runtime.bootstrapped === false) {
-      fullSyncNeeded = true;
-    }
+    const normalizedIncomingTurns = ensureTrailingUserTurn(incomingTurns, userMessage);
+    const rewritten = shouldResetConversation(previousTurns, normalizedIncomingTurns);
+    effectiveTurns = setSessionTurns(sessionKey, normalizedIncomingTurns);
+    resetConversation = rewritten;
   } else {
     const lastStored = previousTurns[previousTurns.length - 1];
     const isDuplicateUser = lastStored?.role === "user" && lastStored.content === userMessage;
@@ -324,27 +329,12 @@ export default async function handler(req, res) {
     if (!isDuplicateUser) {
       effectiveTurns = appendSessionTurns(sessionKey, [{ role: "user", content: userMessage }]);
     }
-
-    if (runtime.bootstrapped === false) {
-      fullSyncNeeded = true;
-    }
   }
 
-  if (systemChanged && runtime.bootstrapped) {
-    resetConversation = true;
-    fullSyncNeeded = true;
-  }
-
-  let upstreamMessage = "";
-  if (fullSyncNeeded) {
-    const turnsForSync = incomingHasHistory ? incomingTurns : effectiveTurns;
-    upstreamMessage = buildTranscriptPrompt({
-      systemText,
-      turns: turnsForSync
-    });
-  } else {
-    upstreamMessage = userMessage;
-  }
+  const upstreamMessage = buildTranscriptPrompt({
+    systemText,
+    turns: effectiveTurns
+  });
 
   if (!upstreamMessage) {
     res.status(400).json({
@@ -372,7 +362,6 @@ export default async function handler(req, res) {
     }
 
     setRuntimeState(sessionKey, {
-      bootstrapped: true,
       systemText
     });
 

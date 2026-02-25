@@ -24,6 +24,8 @@ Do not share this token with other people.
 
 - OpenAI-compatible API surface for c.ai.
 - Model alias layer (`model` -> hidden `character_id`) so client apps do not expose character IDs.
+- Built-in default placeholder mapping for `cai-default`:
+  `-EPBbF-2JeZep6sjrXfQ0aB_UdIZl4tSBwOwnNUB_F4`.
 - Session memory at proxy level.
 - Basic leakage guard for hidden platform/profile identifiers.
 - Risu-friendly integration (OpenAI-compatible mode).
@@ -47,8 +49,8 @@ Compatibility aliases:
 2. Proxy validates `model`, messages, and user token (`Authorization: Bearer <cai_token>`).
 3. Proxy resolves character by alias (`CAI_MODEL_ALIAS` / `CAI_MODEL_MAP_JSON`).
 4. Proxy merges/synchronizes session history (`X-Session-Id` or `user`).
-5. On first turn (or after regenerate/delete rewrite), proxy syncs full transcript (`system/user/assistant`) upstream.
-6. On normal continuation turns, proxy sends only latest user message to keep c.ai conversation state stable.
+5. Proxy sends transcript with `system + user/assistant` turns upstream.
+6. If history is rewritten (regenerate/delete/edit), proxy resets upstream conversation branch.
 7. Proxy sends message to c.ai via `cainode`.
 8. Proxy returns OpenAI-compatible response JSON.
 
@@ -102,12 +104,20 @@ Settings:
 
 Minimum:
 
-- `CAI_CHARACTER_ID=<character_id>`
 - `CAI_MODEL_ALIAS=cai-default`
+
+By default `cai-default` is mapped to:
+
+- `-EPBbF-2JeZep6sjrXfQ0aB_UdIZl4tSBwOwnNUB_F4`
+
+Optional explicit override:
+
+- `CAI_CHARACTER_ID=<character_id>`
 
 Optional multi-alias:
 
 - `CAI_MODEL_MAP_JSON={"cai-default":"CHAR_ID_1","cai-creative":"CHAR_ID_2"}`
+- `CAI_PLACEHOLDER_CHARACTER_ID=<character_id>`
 
 Optional:
 

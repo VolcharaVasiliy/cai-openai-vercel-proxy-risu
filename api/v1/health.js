@@ -1,6 +1,5 @@
 import {
   getDefaultModel,
-  getProxyPersona,
   listModels,
   resolveCharacterId,
   resolveToken
@@ -42,7 +41,6 @@ export default async function handler(req, res) {
   const models = listModels();
   const defaultModel = getDefaultModel();
   const defaultCharacter = resolveCharacterId(defaultModel);
-  const persona = getProxyPersona();
 
   const result = {
     status: "ok",
@@ -55,7 +53,7 @@ export default async function handler(req, res) {
       health: `${baseUrl}/v1/health`
     },
     risu: {
-      recommended_provider: "reverse_proxy",
+      recommended_provider: "openai_compatible",
       format: "OpenAI Compatible",
       recommended_base_url: baseUrl,
       recommended_model: defaultModel,
@@ -66,7 +64,6 @@ export default async function handler(req, res) {
       default_model: defaultModel,
       has_default_character_mapping: Boolean(defaultCharacter),
       has_server_token: Boolean(process.env.CAI_TOKEN && process.env.CAI_TOKEN.trim()),
-      persona_name: persona.name,
       memory_enabled: true
     },
     checks: {
