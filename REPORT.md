@@ -12,7 +12,8 @@
   - keeps `system` from client only,
   - ensures latest user turn is present before upstream send,
   - resets upstream only for rewritten histories (not on repeated system block),
-  - parses single-message Risu blobs (`Conversation history` + `Current user message`) into structured turns.
+  - parses Risu blobs (`Conversation history` + `Current user message`) even when mixed with other incoming messages,
+  - forces extraction of the real current user text instead of storing whole serialized history as a user turn.
 - `api/v1/health.js` - removed stale persona dependency and aligned provider hint with OpenAI-compatible usage.
 - `index.html` - fixed setup guide for Risu (`OpenAI Compatible` + full chat endpoint URL), fixed broken Cyrillic sample text.
 - `.env.example` - documented built-in placeholder and optional overrides.
@@ -32,7 +33,7 @@
 - `ensureTrailingUserTurn` (`api/v1/chat/completions.js`) - guarantees current user message is included in upstream transcript.
 - `shouldResetConversation` (`api/v1/chat/completions.js`) - triggers reset only on non-append rewrites.
 - `parseRisuConversationBlob` (`api/v1/chat/completions.js`) - extracts system text, history turns, and current user message from bundled Risu payload.
-- `rebuildMessagesFromRisuBlob` (`api/v1/chat/completions.js`) - converts parsed blob into standard OpenAI-style `system/user/assistant` list.
+- `rebuildMessagesFromRisuBlob` (`api/v1/chat/completions.js`) - normalizes parsed blob into standard OpenAI-style `system/user/assistant` list and prevents role/history collapsing into one user message.
 - `resolveCharacterId` / model map bootstrap (`lib/config.js`) - now always resolves `cai-default` via env mapping or placeholder fallback.
 
 ## Next steps

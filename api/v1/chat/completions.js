@@ -91,8 +91,10 @@ function parseRisuConversationBlob(content) {
   ]);
   const currentMarker = findFirstMarkerMatch(content, [
     /^\s*Current user message\s*:/im,
+    /^\s*Current user input\s*:/im,
     /^\s*Текущее сообщение пользователя\s*:/im,
-    /^\s*Сообщение пользователя\s*:/im
+    /^\s*Сообщение пользователя\s*:/im,
+    /^\s*Текущее сообщение\s*:/im
   ]);
 
   if (!historyMarker || !currentMarker) {
@@ -108,7 +110,7 @@ function parseRisuConversationBlob(content) {
   const historySection = content.slice(historyStart, currentMarker.index).trim();
   const currentUserMessage = content.slice(currentMarker.index + currentMarker.length).trim();
 
-  if (!historySection || !currentUserMessage) {
+  if (!currentUserMessage) {
     return null;
   }
 
@@ -143,10 +145,6 @@ function parseRisuConversationBlob(content) {
   }
 
   const normalizedTurns = turns.filter((item) => item && item.content);
-  if (!normalizedTurns.length) {
-    return null;
-  }
-
   normalizedTurns.push({
     role: "user",
     content: currentUserMessage
@@ -163,15 +161,12 @@ function rebuildMessagesFromRisuBlob(messages) {
     return [];
   }
 
-  const nonSystemMessages = messages.filter((msg) => msg.role !== "system");
-  const assistantCount = nonSystemMessages.filter((msg) => msg.role === "assistant").length;
-  const userMessages = nonSystemMessages.filter((msg) => msg.role === "user");
-
-  if (assistantCount > 0 || userMessages.length !== 1) {
+  const lastUserMessage = [...messages].reverse().find((msg) => msg.role === "user" && msg.content);
+  if (!lastUserMessage) {
     return messages;
   }
 
-  const parsed = parseRisuConversationBlob(userMessages[0].content);
+  const parsed = parseRisuConversationBlob(lastUserMessage.content);
   if (!parsed) {
     return messages;
   }
@@ -191,6 +186,10 @@ function rebuildMessagesFromRisuBlob(messages) {
       role: "system",
       content: mergedSystemText
     });
+  }
+
+  if (!Array.isArray(parsed.turns) || !parsed.turns.length) {
+    return messages;
   }
 
   return rebuilt.concat(parsed.turns);
