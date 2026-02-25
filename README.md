@@ -88,7 +88,7 @@ This is safer for shared deployments where each user should use their own token.
 - Session key uses token fingerprint + model + session id.
 - Recommended header: `X-Session-Id: <session_id>`.
 - Fallback session source: OpenAI `user` field.
-- If no session id is provided, proxy derives a stable auto-id from the first system/user context.
+- If no session id is provided, proxy uses implicit session aliases from message/system hints to keep the same dialog bound across turns.
 - If client sends full message history, proxy uses it.
 - If client sends only last user message, proxy extends history from in-memory store.
 

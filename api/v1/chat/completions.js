@@ -1,12 +1,17 @@
-﻿import { sendCharacterMessage } from "../../../lib/cai.js";
+import { createHash } from "node:crypto";
+import { sendCharacterMessage } from "../../../lib/cai.js";
 import { getDefaultModel, listModels, resolveCharacterId, resolveSessionId, resolveToken } from "../../../lib/config.js";
 import { appendSessionTurns, getSessionTurns, makeSessionKey, setSessionTurns } from "../../../lib/memory.js";
 import { buildChatCompletion, buildChatCompletionFromList, writeSingleChunkSSE } from "../../../lib/openai-format.js";
 
 const MAX_ASSISTANT_CHARS = Number(process.env.CAI_MAX_ASSISTANT_CHARS || 8000);
+const IMPLICIT_SESSION_ALIAS_MAX = Number(process.env.CAI_IMPLICIT_ALIAS_MAX || 12000);
+const IMPLICIT_SESSION_ALIAS_TTL_MS = Number(process.env.CAI_IMPLICIT_ALIAS_TTL_MS || 1000 * 60 * 60 * 12);
 
 const sessionRuntimeStore = globalThis.__caiSessionRuntimeStore || new Map();
 globalThis.__caiSessionRuntimeStore = sessionRuntimeStore;
+const implicitSessionAliasStore = globalThis.__caiImplicitSessionAliasStore || new Map();
+globalThis.__caiImplicitSessionAliasStore = implicitSessionAliasStore;
 
 function setCorsHeaders(res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
@@ -320,6 +325,124 @@ function clampAssistantText(text) {
   return `${value.slice(0, MAX_ASSISTANT_CHARS)}...`;
 }
 
+function tokenFingerprint(token) {
+  return createHash("sha1").update(String(token || "")).digest("hex").slice(0, 12);
+}
+
+function createImplicitAliasKey({ token, model, hint }) {
+  return createHash("sha1")
+    .update(`${tokenFingerprint(token)}::${String(model || "").trim()}::${String(hint || "").trim()}`)
+    .digest("hex");
+}
+
+function collectSessionHints({ messages, systemText = "", extraTexts = [] }) {
+  const hints = new Set();
+
+  const system = typeof systemText === "string" ? systemText.trim() : "";
+  if (system) {
+    hints.add(`S:${system.slice(0, 220)}`);
+  }
+
+  if (Array.isArray(messages)) {
+    for (const msg of messages) {
+      if (!msg || (msg.role !== "user" && msg.role !== "assistant")) {
+        continue;
+      }
+      if (typeof msg.content !== "string") {
+        continue;
+      }
+      const text = msg.content.trim();
+      if (!text) {
+        continue;
+      }
+      hints.add(`${msg.role === "assistant" ? "A" : "U"}:${text.slice(0, 220)}`);
+      if (hints.size >= 10) {
+        break;
+      }
+    }
+  }
+
+  if (Array.isArray(extraTexts)) {
+    for (const extra of extraTexts) {
+      if (typeof extra !== "string") {
+        continue;
+      }
+      const text = extra.trim();
+      if (!text) {
+        continue;
+      }
+      hints.add(`X:${text.slice(0, 220)}`);
+      if (hints.size >= 12) {
+        break;
+      }
+    }
+  }
+
+  return Array.from(hints);
+}
+
+function pruneImplicitAliasStore() {
+  const now = Date.now();
+  for (const [key, value] of implicitSessionAliasStore.entries()) {
+    if (!value || typeof value !== "object" || !value.updatedAt || now - value.updatedAt > IMPLICIT_SESSION_ALIAS_TTL_MS) {
+      implicitSessionAliasStore.delete(key);
+    }
+  }
+
+  while (implicitSessionAliasStore.size > IMPLICIT_SESSION_ALIAS_MAX) {
+    const firstKey = implicitSessionAliasStore.keys().next().value;
+    if (!firstKey) {
+      break;
+    }
+    implicitSessionAliasStore.delete(firstKey);
+  }
+}
+
+function bindImplicitSessionAliases({ token, model, sessionId, hints }) {
+  if (!sessionId || !Array.isArray(hints) || !hints.length) {
+    return;
+  }
+
+  const now = Date.now();
+  for (const hint of hints) {
+    const key = createImplicitAliasKey({ token, model, hint });
+    implicitSessionAliasStore.set(key, {
+      sessionId,
+      updatedAt: now
+    });
+  }
+  pruneImplicitAliasStore();
+}
+
+function tryResolveImplicitSessionId({ token, model, hints }) {
+  if (!Array.isArray(hints) || !hints.length) {
+    return "";
+  }
+
+  const now = Date.now();
+  for (const hint of hints) {
+    const key = createImplicitAliasKey({ token, model, hint });
+    const value = implicitSessionAliasStore.get(key);
+    if (!value || typeof value !== "object" || typeof value.sessionId !== "string") {
+      continue;
+    }
+    if (!value.updatedAt || now - value.updatedAt > IMPLICIT_SESSION_ALIAS_TTL_MS) {
+      implicitSessionAliasStore.delete(key);
+      continue;
+    }
+    value.updatedAt = now;
+    implicitSessionAliasStore.set(key, value);
+    return value.sessionId;
+  }
+
+  return "";
+}
+
+function createImplicitSessionId({ token, model, hints }) {
+  const seed = `${tokenFingerprint(token)}::${String(model || "").trim()}::${hints.join("||")}::${Date.now()}::${Math.random()}`;
+  return `auto-${createHash("sha1").update(seed).digest("hex").slice(0, 16)}`;
+}
+
 function getRuntimeState(sessionKey) {
   const raw = sessionRuntimeStore.get(sessionKey);
   if (!raw || typeof raw !== "object") {
@@ -438,11 +561,40 @@ export default async function handler(req, res) {
     return;
   }
 
-  const sessionId = resolveSessionId(
+  const explicitSessionId = resolveSessionId(
     req.headers,
-    body.user || body.conversation_id || body.conversationId || body.chat_id || body.chatId,
-    normalizedMessages
+    body.user || body.conversation_id || body.conversationId || body.chat_id || body.chatId
   );
+
+  const { systemText: incomingSystemText, turns: incomingTurns } = splitIncomingMessages(normalizedMessages);
+  const sessionHints = collectSessionHints({
+    messages: normalizedMessages,
+    systemText: incomingSystemText
+  });
+
+  let sessionId = explicitSessionId;
+  if (sessionId === "default-session") {
+    const implicitFound = tryResolveImplicitSessionId({
+      token,
+      model,
+      hints: sessionHints
+    });
+    sessionId =
+      implicitFound ||
+      createImplicitSessionId({
+        token,
+        model,
+        hints: sessionHints
+      });
+  }
+
+  bindImplicitSessionAliases({
+    token,
+    model,
+    sessionId,
+    hints: sessionHints
+  });
+
   const sessionKey = makeSessionKey({ token, model, sessionId });
 
   const runtime = getRuntimeState(sessionKey);
@@ -450,7 +602,6 @@ export default async function handler(req, res) {
     (item) => item && (item.role === "user" || item.role === "assistant") && item.content
   );
 
-  const { systemText: incomingSystemText, turns: incomingTurns } = splitIncomingMessages(normalizedMessages);
   const systemText = incomingSystemText || runtime.systemText || "";
   const incomingHasHistory = incomingTurns.length > 1 || incomingTurns.some((item) => item.role === "assistant");
 
@@ -506,6 +657,19 @@ export default async function handler(req, res) {
     if (safeAssistantText) {
       appendSessionTurns(sessionKey, [{ role: "assistant", content: safeAssistantText }]);
     }
+
+    bindImplicitSessionAliases({
+      token,
+      model,
+      sessionId,
+      hints: collectSessionHints({
+        messages: effectiveTurns.concat(
+          safeAssistantText ? [{ role: "assistant", content: safeAssistantText }] : []
+        ),
+        systemText,
+        extraTexts: [safeAssistantText]
+      })
+    });
 
     setRuntimeState(sessionKey, {
       bootstrapped: true,
