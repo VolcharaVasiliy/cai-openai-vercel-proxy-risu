@@ -51,12 +51,149 @@ function normalizeMessageList(messages) {
     return [];
   }
 
-  return messages
+  const normalized = messages
     .map((msg) => ({
       role: msg?.role,
       content: normalizeMessageContent(msg?.content)
     }))
     .filter((msg) => (msg.role === "system" || msg.role === "user" || msg.role === "assistant") && msg.content);
+
+  return rebuildMessagesFromRisuBlob(normalized);
+}
+
+function findFirstMarkerMatch(text, patterns) {
+  if (typeof text !== "string" || !text) {
+    return null;
+  }
+
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+    if (match && typeof match.index === "number") {
+      return {
+        index: match.index,
+        length: match[0].length
+      };
+    }
+  }
+
+  return null;
+}
+
+function parseRisuConversationBlob(content) {
+  if (typeof content !== "string" || !content.trim()) {
+    return null;
+  }
+
+  const historyMarker = findFirstMarkerMatch(content, [
+    /^\s*Conversation history\s*:/im,
+    /^\s*История диалога\s*:/im,
+    /^\s*История чата\s*:/im
+  ]);
+  const currentMarker = findFirstMarkerMatch(content, [
+    /^\s*Current user message\s*:/im,
+    /^\s*Текущее сообщение пользователя\s*:/im,
+    /^\s*Сообщение пользователя\s*:/im
+  ]);
+
+  if (!historyMarker || !currentMarker) {
+    return null;
+  }
+
+  const historyStart = historyMarker.index + historyMarker.length;
+  if (currentMarker.index <= historyStart) {
+    return null;
+  }
+
+  const systemText = content.slice(0, historyMarker.index).trim();
+  const historySection = content.slice(historyStart, currentMarker.index).trim();
+  const currentUserMessage = content.slice(currentMarker.index + currentMarker.length).trim();
+
+  if (!historySection || !currentUserMessage) {
+    return null;
+  }
+
+  const turns = [];
+  let lastTurn = null;
+
+  for (const line of historySection.split(/\r?\n/)) {
+    const roleMatch = line.match(
+      /^\s*(assistant|user|ассистент|пользователь|юзер)\s*:\s*(.*)$/i
+    );
+
+    if (roleMatch) {
+      const rawRole = roleMatch[1].toLowerCase();
+      const contentPart = roleMatch[2].trim();
+      const role =
+        rawRole === "assistant" || rawRole === "ассистент"
+          ? "assistant"
+          : "user";
+
+      lastTurn = {
+        role,
+        content: contentPart
+      };
+      turns.push(lastTurn);
+      continue;
+    }
+
+    const continuation = line.trimEnd();
+    if (lastTurn && continuation) {
+      lastTurn.content = lastTurn.content ? `${lastTurn.content}\n${continuation}` : continuation;
+    }
+  }
+
+  const normalizedTurns = turns.filter((item) => item && item.content);
+  if (!normalizedTurns.length) {
+    return null;
+  }
+
+  normalizedTurns.push({
+    role: "user",
+    content: currentUserMessage
+  });
+
+  return {
+    systemText,
+    turns: normalizedTurns
+  };
+}
+
+function rebuildMessagesFromRisuBlob(messages) {
+  if (!Array.isArray(messages) || !messages.length) {
+    return [];
+  }
+
+  const nonSystemMessages = messages.filter((msg) => msg.role !== "system");
+  const assistantCount = nonSystemMessages.filter((msg) => msg.role === "assistant").length;
+  const userMessages = nonSystemMessages.filter((msg) => msg.role === "user");
+
+  if (assistantCount > 0 || userMessages.length !== 1) {
+    return messages;
+  }
+
+  const parsed = parseRisuConversationBlob(userMessages[0].content);
+  if (!parsed) {
+    return messages;
+  }
+
+  const existingSystemText = messages
+    .filter((msg) => msg.role === "system")
+    .map((msg) => msg.content)
+    .filter(Boolean)
+    .join("\n\n")
+    .trim();
+
+  const mergedSystemText = [existingSystemText, parsed.systemText].filter(Boolean).join("\n\n").trim();
+  const rebuilt = [];
+
+  if (mergedSystemText) {
+    rebuilt.push({
+      role: "system",
+      content: mergedSystemText
+    });
+  }
+
+  return rebuilt.concat(parsed.turns);
 }
 
 function getLastUserMessage(messages) {
