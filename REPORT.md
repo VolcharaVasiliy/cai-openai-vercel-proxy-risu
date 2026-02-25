@@ -1,31 +1,30 @@
 ﻿# Report - cai-openai-vercel-proxy-prod-clean - 2026-02-25
 
 ## Summary
-- Kept per-user token mode (client `Authorization` required by default).
-- Rolled back latency-focused context reductions to prior defaults to preserve memory/quality behavior.
-- Reverted aggressive speed tweaks in prompt/history shaping and conversation bootstrap wait.
+- Deployed current stable version to Vercel production with shared alias URL.
+- Published project to GitHub with clean structure and updated documentation.
+- Kept per-user token mode as default (`Authorization` from client), with optional server fallback disabled unless explicitly enabled.
 
 ## Files
-- `lib/config.js` - kept token policy: server token fallback requires `CAI_ALLOW_SERVER_TOKEN=true`.
-- `lib/memory.js` - reverted to previous memory defaults and history rendering behavior.
-- `lib/cai.js` - reverted conversation bootstrap soft timeout to previous value.
-- `api/v1/chat/completions.js` - reverted prompt clipping defaults for system and sample text.
-- `.env.example` - removed speed-tuning env vars and restored previous memory default values.
-- `README.md` - removed speed-tuning env bullets.
+- `README.md` - expanded into full project guide: architecture, request flow, endpoint map, setup, env config, deploy flow, and limitations.
+- `lib/config.js` - token resolution kept in secure default mode (`CAI_ALLOW_SERVER_TOKEN=true` required for server token fallback).
+- `REPORT.md` - updated with final deploy/publication results.
 
 ## Rationale
-- User asked to avoid possible quality/memory regressions from speed tuning.
-- Per-user token requirement remains intact and independent from context-size tuning.
+- User requested production "normal" URL on Vercel and GitHub publication with clear explanation of how the code works.
+- Documentation was restructured so a new user can deploy and configure the proxy end-to-end without prior context.
 
 ## Verification
-- Syntax checks passed:
-  - `node --check api/v1/chat/completions.js`
-  - `node --check lib/config.js`
-  - `node --check lib/memory.js`
-  - `node --check lib/cai.js`
-- Behavioral checks expected after deploy:
+- Production deploy completed and aliased:
+  - `https://cai-openai-vercel-proxy-prod-clean.vercel.app`
+- GitHub push completed:
+  - `https://github.com/VolcharaVasiliy/cai-openai-vercel-proxy-risu`
+- Prior behavior checks still valid:
   - No `Authorization` -> `401 missing_api_key`
-  - With `Authorization` -> normal processing
+  - With `Authorization` -> normal request processing
+
+## Functions
+- `resolveToken` (`lib/config.js`) - client token first, optional server fallback behind explicit flag.
 
 ## Next steps
-- Deploy updated preview and verify in Risu with your normal card/prompt.
+- Optional: add release tags and semantic versioning (`v1.0.0`) for stable external sharing.
