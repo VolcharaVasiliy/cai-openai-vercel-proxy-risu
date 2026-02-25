@@ -2,13 +2,31 @@
 
 Production-ready serverless proxy that lets OpenAI-compatible clients (Risu, custom apps) call Character.AI through standard endpoints.
 
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/VolcharaVasiliy/cai-openai-vercel-proxy-risu&project-name=cai-openai-vercel-proxy-risu&repository-name=cai-openai-vercel-proxy-risu&env=CAI_CHARACTER_ID,CAI_MODEL_ALIAS,CAI_ALLOW_SERVER_TOKEN&envDescription=Set%20character%20id%20and%20model%20alias.%20Keep%20server%20token%20disabled.&envLink=https://github.com/VolcharaVasiliy/cai-openai-vercel-proxy-risu#environment-variables)
+
+## Public project URL
+
+- Current public URL: `https://cai-openai-vercel-proxy-prod-clean.vercel.app`
+- You can deploy your own copy with the button above and get your own URL.
+
+## How to get c.ai token
+
+1. Open your target character page on Character.AI.
+2. Press `F12` to open DevTools.
+3. Refresh the page (`Ctrl+R`).
+4. Open Network tab and find a request that contains `user/` in URL.
+5. Open request headers and copy `authorization` value.
+6. Use this value as your token in Risu/API key field.
+
+Do not share this token with other people.
+
 ## What this project solves
 
 - OpenAI-compatible API surface for c.ai.
 - Model alias layer (`model` -> hidden `character_id`) so client apps do not expose character IDs.
 - Session memory at proxy level.
 - Basic leakage guard for hidden platform/profile identifiers.
-- Risu-friendly integration (`reverse_proxy` + OpenAI format).
+- Risu-friendly integration (OpenAI-compatible mode).
 
 ## API endpoints
 
@@ -73,12 +91,11 @@ This is safer for shared deployments where each user should use their own token.
 
 Settings:
 
-- AI Model: `reverse_proxy`
-- URL: base URL only, example `https://your-project.vercel.app`
+- Provider/Model type: OpenAI-compatible (do not use `reverse_proxy`)
+- URL: `https://your-project.vercel.app/v1/chat/completions`
 - Key/Password: user c.ai token
-- Request Model: alias from `/v1/models` (example `cai-default`)
-- Format: `OpenAI Compatible`
-- Advanced: keep `Autofill Request URL` enabled
+- Model: alias from `/v1/models` (example `cai-default`)
+- Streaming: recommended OFF for first test
 
 ## Environment variables
 
