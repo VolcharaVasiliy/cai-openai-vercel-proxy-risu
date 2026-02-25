@@ -5,17 +5,16 @@
 - Set new default placeholder character to `-EPBbF-2JeZep6sjrXfQ0aB_UdIZl4tSBwOwnNUB_F4`.
 - Fixed chat routing docs/UI hints and continued history logic to avoid context overwrite.
 - Added Risu blob parser to split bundled history into separate `assistant/user` turns.
-- Added hybrid upstream mode: full transcript on first sync/rewrite, then user-only continuation turns.
+- Simplified upstream mode to strict behavior: first message sends full context, all next messages send only user text.
 
 ## Files
 - `lib/config.js` - added fallback mapping for `cai-default` to the new placeholder character when env mapping is absent.
 - `api/v1/chat/completions.js` - stabilized turn handling:
   - keeps `system` from client only,
   - ensures latest user turn is present before upstream send,
-  - resets upstream only for rewritten histories (not on repeated system block),
   - parses Risu blobs (`Conversation history` + `Current user message`) even when mixed with other incoming messages,
   - forces extraction of the real current user text instead of storing whole serialized history as a user turn,
-  - sends full transcript only when required (`first sync`, `system changed`, `history rewritten`) and user-only otherwise.
+  - sends full transcript only on first message in session, then user-only on all continuation turns.
 - `api/v1/health.js` - removed stale persona dependency and aligned provider hint with OpenAI-compatible usage.
 - `index.html` - fixed setup guide for Risu (`OpenAI Compatible` + full chat endpoint URL), fixed broken Cyrillic sample text.
 - `.env.example` - documented built-in placeholder and optional overrides.
@@ -23,7 +22,7 @@
 
 ## Rationale
 - Preview deployments had no Vercel env vars, causing `Unknown model "cai-default"` and a hard failure.
-- Risu sends system blocks frequently; resetting upstream on every system delta caused context collapse.
+- User requested deterministic behavior without dynamic rewrite/system resync branches.
 - Placeholder had to be switched to the new requested character id globally.
 - Risu can send full chat history inside one `user` message; without parsing, proxy stored that entire block as one turn and produced role/message merging.
 
@@ -33,11 +32,9 @@
 
 ## Functions
 - `ensureTrailingUserTurn` (`api/v1/chat/completions.js`) - guarantees current user message is included in upstream transcript.
-- `shouldResetConversation` (`api/v1/chat/completions.js`) - triggers reset only on non-append rewrites.
 - `parseRisuConversationBlob` (`api/v1/chat/completions.js`) - extracts system text, history turns, and current user message from bundled Risu payload.
 - `rebuildMessagesFromRisuBlob` (`api/v1/chat/completions.js`) - normalizes parsed blob into standard OpenAI-style `system/user/assistant` list and prevents role/history collapsing into one user message.
 - `resolveCharacterId` / model map bootstrap (`lib/config.js`) - now always resolves `cai-default` via env mapping or placeholder fallback.
 
 ## Next steps
-- Redeploy preview and verify `/v1/models` returns `cai-default`.
-- Verify in Risu with multi-turn and regenerate/delete scenarios.
+- Redeploy production and verify first-turn full context + second-turn user-only flow in Risu.

@@ -49,11 +49,10 @@ Compatibility aliases:
 2. Proxy validates `model`, messages, and user token (`Authorization: Bearer <cai_token>`).
 3. Proxy resolves character by alias (`CAI_MODEL_ALIAS` / `CAI_MODEL_MAP_JSON`).
 4. Proxy merges/synchronizes session history (`X-Session-Id` or `user`).
-5. On first sync (or after rewrite/system change), proxy sends full transcript with `system + user/assistant` turns.
-6. On normal continuation turns, proxy sends only the latest user message.
-7. If history is rewritten (regenerate/delete/edit), proxy resets upstream conversation branch.
-8. Proxy sends message to c.ai via `cainode`.
-9. Proxy returns OpenAI-compatible response JSON.
+5. On first message in a session, proxy sends full transcript with `system + user/assistant` turns.
+6. On all next messages in that session, proxy sends only the latest user message.
+7. Proxy sends message to c.ai via `cainode`.
+8. Proxy returns OpenAI-compatible response JSON.
 
 ## Core files and responsibilities
 
@@ -180,4 +179,4 @@ vercel deploy --prod -y
 - c.ai backend is character-centric; this proxy maps alias to character id.
 - Memory and persona cache are in-process (serverless instance-local).
 - Cold starts and c.ai upstream latency are expected in serverless mode.
-- For edited/re-generated history, proxy can reset upstream conversation when the incoming message chain is rewritten (not append-only).
+- Continuation mode is intentionally simple: first full context, then user-only messages.
