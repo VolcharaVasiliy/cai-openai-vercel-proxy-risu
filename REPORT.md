@@ -5,6 +5,7 @@
 - Set new default placeholder character to `-EPBbF-2JeZep6sjrXfQ0aB_UdIZl4tSBwOwnNUB_F4`.
 - Fixed chat routing docs/UI hints and continued history logic to avoid context overwrite.
 - Added Risu blob parser to split bundled history into separate `assistant/user` turns.
+- Added hybrid upstream mode: full transcript on first sync/rewrite, then user-only continuation turns.
 
 ## Files
 - `lib/config.js` - added fallback mapping for `cai-default` to the new placeholder character when env mapping is absent.
@@ -13,7 +14,8 @@
   - ensures latest user turn is present before upstream send,
   - resets upstream only for rewritten histories (not on repeated system block),
   - parses Risu blobs (`Conversation history` + `Current user message`) even when mixed with other incoming messages,
-  - forces extraction of the real current user text instead of storing whole serialized history as a user turn.
+  - forces extraction of the real current user text instead of storing whole serialized history as a user turn,
+  - sends full transcript only when required (`first sync`, `system changed`, `history rewritten`) and user-only otherwise.
 - `api/v1/health.js` - removed stale persona dependency and aligned provider hint with OpenAI-compatible usage.
 - `index.html` - fixed setup guide for Risu (`OpenAI Compatible` + full chat endpoint URL), fixed broken Cyrillic sample text.
 - `.env.example` - documented built-in placeholder and optional overrides.

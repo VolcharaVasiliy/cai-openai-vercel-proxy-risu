@@ -324,17 +324,20 @@ function getRuntimeState(sessionKey) {
   const raw = sessionRuntimeStore.get(sessionKey);
   if (!raw || typeof raw !== "object") {
     return {
+      bootstrapped: false,
       systemText: ""
     };
   }
 
   return {
+    bootstrapped: raw.bootstrapped === true,
     systemText: typeof raw.systemText === "string" ? raw.systemText : ""
   };
 }
 
 function setRuntimeState(sessionKey, state) {
   sessionRuntimeStore.set(sessionKey, {
+    bootstrapped: state?.bootstrapped === true,
     systemText: typeof state?.systemText === "string" ? state.systemText : "",
     updatedAt: Date.now()
   });
@@ -448,16 +451,21 @@ export default async function handler(req, res) {
 
   const { systemText: incomingSystemText, turns: incomingTurns } = splitIncomingMessages(normalizedMessages);
   const systemText = incomingSystemText || runtime.systemText || "";
+  const systemChanged = Boolean(incomingSystemText && incomingSystemText !== runtime.systemText);
   const incomingHasHistory = incomingTurns.length > 1 || incomingTurns.some((item) => item.role === "assistant");
 
   let effectiveTurns = previousTurns;
   let resetConversation = false;
+  let fullSyncNeeded = runtime.bootstrapped !== true;
 
   if (incomingHasHistory) {
     const normalizedIncomingTurns = ensureTrailingUserTurn(incomingTurns, userMessage);
     const rewritten = shouldResetConversation(previousTurns, normalizedIncomingTurns);
     effectiveTurns = setSessionTurns(sessionKey, normalizedIncomingTurns);
-    resetConversation = rewritten;
+    if (rewritten) {
+      resetConversation = true;
+      fullSyncNeeded = true;
+    }
   } else {
     const lastStored = previousTurns[previousTurns.length - 1];
     const isDuplicateUser = lastStored?.role === "user" && lastStored.content === userMessage;
@@ -467,10 +475,19 @@ export default async function handler(req, res) {
     }
   }
 
-  const upstreamMessage = buildTranscriptPrompt({
-    systemText,
-    turns: effectiveTurns
-  });
+  if (systemChanged) {
+    if (runtime.bootstrapped === true) {
+      resetConversation = true;
+    }
+    fullSyncNeeded = true;
+  }
+
+  const upstreamMessage = fullSyncNeeded
+    ? buildTranscriptPrompt({
+        systemText,
+        turns: effectiveTurns
+      })
+    : userMessage;
 
   if (!upstreamMessage) {
     res.status(400).json({
@@ -498,6 +515,7 @@ export default async function handler(req, res) {
     }
 
     setRuntimeState(sessionKey, {
+      bootstrapped: true,
       systemText
     });
 
